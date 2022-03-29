@@ -1,12 +1,29 @@
+#include <stdio.h>
+#include <stm32f0xx.h>
+#include <stm32f051x8.h>
+#include <GPIO.h>
+#include <DS18B20.h>
+
+void delay_mks(uint32_t  mks){
+
+	SysTick->LOAD = 1*mks;
+	SysTick->VAL = 0;
+	SysTick->CTRL = 0x1;
+	while (!((SysTick->CTRL) & SysTick_CTRL_COUNTFLAG_Msk)){};
+	SysTick->CTRL = 0;
+}
+
 int main(void) {
 //	int i = 0;
 	
-	uint16_t data = 0x1234;
-	uint32_t address;
+//	uint16_t data = 0x1234;
+//	uint32_t address;
 	
 	//HSI (8 MHz) on
 	RCC->CR |= RCC_CR_HSION;
 	while (!(RCC->CR & RCC_CR_HSIRDY_Msk)) {}
+		
+	RCC->CFGR &= ~RCC_CFGR_SW_HSI;
 		
 	//configuring prescelers
 	//AHB = 1, SYSCLK not  divided
@@ -30,7 +47,10 @@ int main(void) {
 	
 	RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
 	
-	GPIOA->MODER |= GPIO_MODER_MODER0_0;
+	//PA0 - button
+	GPIOA->MODER &= ~GPIO_MODER_MODER0;
+	GPIOA->PUPDR |= GPIO_PUPDR_PUPDR0_1; //without PULL_DOWN button works only ones
+	GPIOA->OSPEEDR |= GPIO_OSPEEDR_OSPEEDR2_0;
 	
 	//////////////////////////////////////////////////////
 				
@@ -62,42 +82,53 @@ int main(void) {
 	USART1->CR1 |= USART_CR1_TE | USART_CR1_RE ; // enable receiver and transmitter
 	
 	USART1->CR1 |= USART_CR1_UE; //USART enable
+	
+	__NVIC_EnableIRQ(USART1_IRQn); // enable button interrupt
 	////////////////////////////////////////
 	
-	data = 0;
+	////////////////////////////////////////
 	
-	while ((USART1->ISR & USART_ISR_TXE) == 0) {}
-	USART1->TDR = data>>8;
-	while ((USART1->ISR & USART_ISR_TXE) == 0) {}
-	USART1->TDR = data>>0;
-		
-	data = 0x1234;
-		
-	address = (uint32_t)&data;
+	//Button interruption (it really works)
+//	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; //enable selection of source for the exti interruption
+	//interrupt setting for button
+	EXTI->IMR = 0;
+	EXTI->IMR |= EXTI_IMR_MR0;// Configure the corresponding mask bit in the EXTI_IMR register
+	EXTI->RTSR |= EXTI_RTSR_TR0;//Configure the Trigger Selection bits of the Interrupt line on rising edge
+	EXTI->FTSR &= ~EXTI_FTSR_TR0;//Configure the Trigger Selection bits of the Interrupt line NOT on falling edge
+	SYSCFG->EXTICR[0] |= SYSCFG_EXTICR1_EXTI0_PA;  ////unnecessary coz default value is 0000
 	
-	while ((USART1->ISR & USART_ISR_TXE) == 0) {}
-	USART1->TDR = data>>8;
-	while ((USART1->ISR & USART_ISR_TXE) == 0) {}
-	USART1->TDR = data>>0;
-			
-	while ((USART1->ISR & USART_ISR_TXE) == 0) {}
-	USART1->TDR = address>>24;
-	while ((USART1->ISR & USART_ISR_TXE) == 0) {}
-	USART1->TDR = address>>16;
-	while ((USART1->ISR & USART_ISR_TXE) == 0) {}
-	USART1->TDR = address>>8;
-	while ((USART1->ISR & USART_ISR_TXE) == 0) {}
-	USART1->TDR = address>>0;
-		
-	data = 0;
+	__NVIC_EnableIRQ(EXTI0_1_IRQn); // enable button interrupt
+	///////////////////////////////////////
 	
-	while ((USART1->ISR & USART_ISR_TXE) == 0) {}
-	USART1->TDR = data>>8;
-	while ((USART1->ISR & USART_ISR_TXE) == 0) {}
-	USART1->TDR = data>>0;
+	delay_mks(1000000);
+	USART1->TDR = 0x00;
 	
 	while (1) {
 	
 	}
 
 }
+
+void EXTI0_1_IRQHandler (void){ //button interrupt
+	
+	USART1->CR1 |= USART_CR1_TXEIE; //start USART transmission 
+	
+	EXTI->PR = EXTI_PR_PR0;
+	
+	__NVIC_ClearPendingIRQ(EXTI0_1_IRQn);//exit from button interrupt
+	
+	
+}
+
+void USART1_IRQHandler(void){
+	
+	USART1->ISR |= USART_ISR_TXE;
+	
+	USART1->TDR = 0x7A;
+	delay_mks(1000000);
+	
+	__NVIC_ClearPendingIRQ(USART1_IRQn);//exit from USART interrupt
+	
+}
+
+
